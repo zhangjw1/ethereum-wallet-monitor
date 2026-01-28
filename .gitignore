@@ -30,3 +30,12 @@ Thumbs.db
 
 # Local configuration
 config/local_*.go
+
+# Kiro settings
+.kiro/
+
+# Go sum file (can be regenerated)
+go.sum
+
+# Test files
+test_*.go
