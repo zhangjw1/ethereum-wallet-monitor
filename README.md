@@ -9,11 +9,13 @@
 - 📊 显示交易详情（金额、发送方、接收方、区块号、Gas 价格）
 - 🔄 自动轮询新区块（默认间隔：10 秒）
 - 🌐 支持代理配置
+- ⚡ 支持多种监控后端（Hydro Protocol, Go-Ethereum官方库）
 
 ## 技术栈
 
 - Go 1.21
 - ethereum-watcher - 以太坊区块链监控库
+- go-ethereum - 官方Go以太坊实现
 - Infura - 以太坊节点服务
 
 ## 快速开始
@@ -43,6 +45,10 @@ const (
 go run main.go
 ```
 
+程序会提示选择监控模式：
+- 1: 使用 Hydro Protocol 监控（轮询模式）
+- 2: 使用官方 Go-Ethereum 监控（事件订阅模式）
+
 ## 项目结构
 
 ```
@@ -53,21 +59,33 @@ go run main.go
 ├── utils/
 │   └── HttpClientUtils.go          # HTTP 客户端工具
 └── wallet/
-    └── EthereumWalletMonitor.go    # 钱包监控核心逻辑
+    ├── EthereumWalletMonitor.go    # 原有监控实现（Hydro Protocol）
+    └── GoEthereumWalletMonitor.go  # 新增监控实现（官方Go-Ethereum）
 ```
 
 ## 配置说明
 
-- `ETHEREUM_RPC_URL`: Infura 或其他以太坊节点的 RPC 地址
+- `INFURA_KEY`: Infura 项目的 API 密钥（注意：不是完整URL，而是密钥部分）
 - `OKX_WALLET_ADDRESS`: 要监控的钱包地址
 - `SLEEP_SECONDS_FOR_NEW_BLOCK`: 轮询新区块的间隔（秒）
 - `ETH_THRESHOLD`: 大额交易告警阈值（ETH）
 
+## 两种监控方式对比
+
+| 特性 | Hydro Protocol | Go-Ethereum |
+|------|----------------|-------------|
+| 实现方式 | HTTP轮询 | WebSocket订阅 |
+| 实时性 | 较低（取决于轮询间隔） | 更高（实时推送） |
+| 资源消耗 | 轮询开销 | 订阅开销 |
+| 官方支持 | 第三方 | 以太坊基金会 |
+| 功能覆盖 | 基础功能 | 完整功能 |
+
 ## 注意事项
 
-- 需要有效的 Infura API Key
+- 需要有效的 Infura API Key 或其他以太坊节点服务
 - 如果在国内使用，可能需要配置代理
 - 代理配置在 `utils/HttpClientUtils.go` 中
+- 新增了官方go-ethereum库支持，提供更多功能选项
 
 ## License
 

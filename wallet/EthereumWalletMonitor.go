@@ -3,10 +3,14 @@ package wallet
 import (
 	"context"
 	"etherum-monitor/config"
+	"etherum-monitor/logger"
 	"etherum-monitor/utils"
-	"fmt"
 	"math/big"
 	"strings"
+
+	"go.uber.org/zap"
+
+	"github.com/ethereum/go-ethereum/common"
 
 	ethereum "github.com/HydroProtocol/ethereum-watcher"
 	"github.com/HydroProtocol/ethereum-watcher/structs"
@@ -18,34 +22,130 @@ type EtherenumThransactionPlugin struct {
 }
 
 func (p *EtherenumThransactionPlugin) AcceptTx(tx structs.RemovableTx) {
-	// 先打印所有交易，看看是否有数据进来
-	fmt.Printf("📥 收到交易 - 区块: %d, 哈希: %s\n", tx.GetBlockNumber(), tx.GetHash())
+	logger.Debug("收到交易",
+		zap.Uint64("block", tx.GetBlockNumber()),
+		zap.String("hash", tx.GetHash()))
 
 	// 使用不区分大小写的比较
 	from := strings.ToLower(tx.GetFrom())
 	to := strings.ToLower(tx.GetTo())
 	target := strings.ToLower(p.targetAddress)
-	fmt.Printf("目标地址：%s,发送地址:%s,接收地址:%s\n", target, from, to)
+
 	if from != target && to != target {
 		return
 	}
 
 	value := tx.GetValue()
-	fmt.Printf("✅ 匹配到目标地址的交易：%s\n", tx.GetHash())
-	fmt.Printf("金额：%s ETH\n", weiToEth(&value))
-	fmt.Printf("发送方：%s\n", tx.GetFrom())
-	fmt.Printf("接收方：%s\n", tx.GetTo())
-	fmt.Printf("区块号：%d\n", tx.GetBlockNumber())
-	fmt.Printf("当前gas：%s\n", tx.GetGasPrice())
+	gasPrice := tx.GetGasPrice()
+	logger.Info("匹配到目标地址的交易",
+		zap.String("hash", tx.GetHash()),
+		zap.String("amount", weiToEth(&value)+" ETH"),
+		zap.String("from", tx.GetFrom()),
+		zap.String("to", tx.GetTo()),
+		zap.Uint64("block", tx.GetBlockNumber()),
+		zap.String("gasPrice", gasPrice.String()))
 
 	if value.Cmp(p.threshold) > 0 {
 		p.processTransaction(tx)
 	}
 }
 
+// 监控交易的信息
+func (p *EtherenumThransactionPlugin) Accept(tx *structs.RemovableTxAndReceipt) {
+	logger.Debug("匹配到目标地址的区块", zap.Any("logs", tx.Receipt.GetLogs()))
+}
+
+type USDTTransferPlugin struct {
+	targetAddress string
+	threshold     *big.Int
+}
+
+func (p *USDTTransferPlugin) Accept(log *structs.RemovableReceiptLog) {
+	logger.Debug("收到 USDT Transfer 事件",
+		zap.String("blockHash", log.GetBlockHash()),
+		zap.Int("blockNum", log.GetBlockNum()),
+		zap.String("txHash", log.GetTransactionHash()))
+
+	if log.IsRemoved {
+		logger.Warn("日志被删除", zap.String("blockHash", log.GetBlockHash()))
+		return
+	}
+
+	topics := log.GetTopics()
+	if len(topics) < 3 {
+		logger.Warn("USDT Transfer 事件 topics 数量不足", zap.Int("count", len(topics)))
+		return
+	}
+
+	// topics[0] 是事件签名 Transfer(address,address,uint256)
+	// topics[1] 是 from 地址
+	// topics[2] 是 to 地址
+	from := strings.ToLower(extractAddress(topics[1]))
+	to := strings.ToLower(extractAddress(topics[2]))
+	target := strings.ToLower(p.targetAddress)
+
+	logger.Debug("USDT Transfer 地址信息",
+		zap.String("from", from),
+		zap.String("to", to),
+		zap.String("target", target))
+
+	/*	if from != target && to != target {
+		return
+	}*/
+
+	// data 字段包含转账金额
+	value := new(big.Int).SetBytes(common.FromHex(log.GetData()))
+
+	// 将 USDT 金额转换为可读格式（6位小数）
+	usdtAmount := new(big.Float).SetInt(value)
+	divisor := new(big.Float).SetFloat64(1e6)
+	result := new(big.Float).Quo(usdtAmount, divisor)
+
+	logger.Debug("检测到 USDT 转账",
+		zap.String("from", from),
+		zap.String("to", to),
+		zap.String("amount", result.String()+" USDT"),
+		zap.String("txHash", log.GetTransactionHash()))
+
+	if value.Cmp(p.threshold) > 0 {
+		direction := "转入"
+		if from == target {
+			direction = "转出"
+		}
+		logger.Warn("🚨 USDT 大额转账告警",
+			zap.String("direction", direction),
+			zap.String("from", from),
+			zap.String("to", to),
+			zap.String("amount", result.String()+" USDT"),
+			zap.String("txHash", log.GetTransactionHash()),
+			zap.Int("blockNum", log.GetBlockNum()))
+	}
+}
+
+func (p *USDTTransferPlugin) FromContract() string {
+	return config.USDT_CONTRACT_ADDRESS
+}
+
+func (p *USDTTransferPlugin) InterestedTopics() []string {
+	return []string{config.USDT_TRANSFER_TOPIC}
+}
+
+func (p *USDTTransferPlugin) NeedReceiptLog(receiptLog *structs.RemovableReceiptLog) bool {
+	return true
+}
+
+// 辅助函数：从 Topic 中提取地址
+func extractAddress(topic string) string {
+	// Topic 是 32 字节，地址是后 20 字节
+	if len(topic) >= 66 { // "0x" + 64 个字符
+		return "0x" + topic[26:] // 跳过前 26 个字符（0x + 24个0）
+	}
+	return topic
+}
+
 func (p *EtherenumThransactionPlugin) processTransaction(tx structs.RemovableTx) {
 	if tx.IsRemoved {
-		fmt.Printf("交易被删除：%s\n", tx.GetHash())
+		logger.Warn("交易被删除", zap.String("hash", tx.GetHash()))
 		return
 	}
 	direction := "转入"
@@ -53,21 +153,29 @@ func (p *EtherenumThransactionPlugin) processTransaction(tx structs.RemovableTx)
 		direction = "转出"
 	}
 	value := tx.GetValue()
-	fmt.Printf("\n🚨 大额交易告警！\n")
-	fmt.Println("----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------")
-	fmt.Printf("交易方向：%s\n", direction)
-	fmt.Printf("交易哈希：%s\n", tx.GetHash())
-	fmt.Printf("金额：%s ETH\n", weiToEth(&value))
-	fmt.Printf("发送方：%s\n", tx.GetFrom())
-	fmt.Printf("接收方：%s\n", tx.GetTo())
-	fmt.Printf("区块号：%d\n", tx.GetBlockNumber())
-	fmt.Println("----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------")
+	logger.Warn("🚨 大额交易告警",
+		zap.String("direction", direction),
+		zap.String("hash", tx.GetHash()),
+		zap.String("amount", weiToEth(&value)+" ETH"),
+		zap.String("from", tx.GetFrom()),
+		zap.String("to", tx.GetTo()),
+		zap.Uint64("block", tx.GetBlockNumber()))
 }
 
-// 创建 10 ETH 的阈值
+// 创建 ETH 的阈值（基于配置）
 func createThreshold() *big.Int {
 	threshold := big.NewInt(0)
-	threshold.SetString("10000000000000000000", config.ETH_THRESHOLD)
+	// 将 ETH 阈值转换为 Wei 单位 (1 ETH = 10^18 Wei)
+	// config.ETH_THRESHOLD 是以 ETH 为单位的阈值，这里是 10 ETH
+	ethValue := new(big.Int).Mul(big.NewInt(int64(config.ETH_THRESHOLD)), big.NewInt(1000000000000000000))
+	threshold.Set(ethValue)
+	return threshold
+}
+
+func createUSDTThreshold(amount int64) *big.Int {
+	// USDT 是 6 位小数
+	threshold := big.NewInt(amount)
+	threshold.Mul(threshold, big.NewInt(1000000)) // 乘以 10^6
 	return threshold
 }
 
@@ -79,39 +187,46 @@ func weiToEth(wei *big.Int) string {
 }
 
 func AddressAddMonitor() {
-	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-	fmt.Println("🚀 以太坊钱包监控程序启动")
-	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+	logger.Info("🚀 以太坊钱包监控程序启动")
 
 	// 必须在创建 watcher 之前设置代理
-	fmt.Println("⚙️  正在配置代理...")
+
 	utils.SetGlobalProxy()
-	fmt.Println("✓ 代理已设置: http://127.0.0.1:7890")
 
 	ethereumPlugin := &EtherenumThransactionPlugin{
 		targetAddress: config.OKX_WALLET_ADDRESS,
 		threshold:     createThreshold(),
 	}
 
-	fmt.Println("⚙️  正在创建 Watcher...")
-	watcher := ethereum.NewHttpBasedEthWatcher(context.Background(), config.ETHEREUM_RPC_URL)
+	usdtTransferPlugin := &USDTTransferPlugin{
+		targetAddress: config.OKX_WALLET_ADDRESS,
+		threshold:     createUSDTThreshold(config.USDT_THRESHOLD),
+	}
+
+	logger.Info("正在创建 Watcher...")
+	watcher := ethereum.NewHttpBasedEthWatcher(context.Background(), config.GetEthereumRpcUrl())
 
 	// 设置轮询间隔（秒）
 	watcher.SetSleepSecondsForNewBlock(config.SLEEP_SECONDS_FOR_NEW_BLOCK)
-	fmt.Printf("✓ 轮询间隔: %d 秒\n", config.SLEEP_SECONDS_FOR_NEW_BLOCK)
+	logger.Info("配置完成",
+		zap.Int("pollInterval", config.SLEEP_SECONDS_FOR_NEW_BLOCK),
+		zap.String("address", config.OKX_WALLET_ADDRESS),
+		zap.Int("threshold", config.ETH_THRESHOLD))
 
 	watcher.RegisterTxPlugin(ethereumPlugin)
-	fmt.Println("✓ 插件已注册")
+	logger.Info("ETH 交易插件已注册")
 
-	fmt.Printf("👀 监听钱包地址：%s\n", config.OKX_WALLET_ADDRESS)
-	fmt.Println("💰 告警阈值: 10 ETH")
-	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-	fmt.Println("⏳ 等待新区块...")
-	fmt.Println()
+	watcher.RegisterReceiptLogPlugin(usdtTransferPlugin)
+	logger.Info("USDT Transfer 插件已注册",
+		zap.String("contract", config.USDT_CONTRACT_ADDRESS),
+		zap.String("topic", config.USDT_TRANSFER_TOPIC),
+		zap.Int64("threshold", config.USDT_THRESHOLD))
+
+	logger.Info("⏳ 等待新区块...")
 
 	err := watcher.RunTillExit()
 	if err != nil {
-		fmt.Printf("❌ 运行错误：%v\n", err)
+		logger.Error("运行错误", zap.Error(err))
 		return
 	}
 }

@@ -31,6 +31,9 @@ Thumbs.db
 # Local configuration
 config/local_*.go
 
+# Environment variables (contains sensitive data)
+.env
+
 # Kiro settings
 .kiro/
 
