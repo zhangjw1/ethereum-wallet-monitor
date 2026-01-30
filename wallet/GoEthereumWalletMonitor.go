@@ -2,7 +2,7 @@ package wallet
 
 import (
 	"context"
-	"etherum-monitor/config"
+	"ethereum-monitor/config"
 	"fmt"
 	"log"
 	"math/big"
@@ -117,7 +117,7 @@ func (g *GoEthereumWalletMonitor) handleNewBlock(header *types.Header) {
 
 // checkTransactionsForTargetAddress 检查块中的交易是否涉及目标地址
 func (g *GoEthereumWalletMonitor) checkTransactionsForTargetAddress(block *types.Block) {
-	targetAddress := config.OKX_WALLET_ADDRESS
+	targetAddress := config.OkxWalletAddress
 	addr := common.HexToAddress(targetAddress)
 
 	for i, tx := range block.Transactions() {
@@ -159,7 +159,7 @@ func GoEthereumAddressAddMonitor() {
 	fmt.Printf("✅ 成功连接到以太坊节点: %s\n", config.GetEthereumRpcUrl())
 
 	// 获取目标地址余额
-	balance, err := monitor.GetBalance(config.OKX_WALLET_ADDRESS)
+	balance, err := monitor.GetBalance(config.OkxWalletAddress)
 	if err != nil {
 		fmt.Printf("⚠️  获取余额失败: %v\n", err)
 	} else {

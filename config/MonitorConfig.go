@@ -6,17 +6,18 @@ import (
 )
 
 const (
-	OKX_WALLET_ADDRESS = "0x6ea08ca8f313d860808ef7431fc72c6fbcf4a72d"
+	OkxWalletAddress = "0x6ea08ca8f313d860808ef7431fc72c6fbcf4a72d"
 
-	USDT_CONTRACT_ADDRESS = "0xdac17f958d2ee523a2206206994597c13d831ec7"
+	UsdtContractAddress = "0xdac17f958d2ee523a2206206994597c13d831ec7"
 
-	SLEEP_SECONDS_FOR_NEW_BLOCK = 10
+	// 以太坊平均出块时间约 12 秒，设置为 20 秒可以减少更多请求
+	SleepSecondsForNewBlock = 20
 
-	ETH_THRESHOLD = 10
+	EthThreshold = 10
 
-	USDT_THRESHOLD = 10000
+	UsdtThreshold = 500000
 	// USDT 转账事件
-	USDT_TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+	UsdtTransferTopic = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
 )
 
 // GetEthereumRpcUrl 从环境变量获取 Infura Key 并构建 RPC URL

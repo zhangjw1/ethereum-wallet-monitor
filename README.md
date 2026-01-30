@@ -1,22 +1,21 @@
-# Ethereum Wallet Monitor
+# Ethereum MEV Monitor
 
-以太坊钱包监控工具 - 实时监控以太坊钱包地址的交易活动，支持大额交易告警
+以太坊 MEV 监控工具 - 实时监控以太坊交易中的 MEV（最大可提取价值）攻击行为
 
 ## 功能特性
 
-- 🔍 实时监控指定以太坊钱包地址的交易
-- 💰 支持大额交易告警（默认阈值：10 ETH）
-- 📊 显示交易详情（金额、发送方、接收方、区块号、Gas 价格）
-- 🔄 自动轮询新区块（默认间隔：10 秒）
+- 🔍 MEV 攻击检测（三明治攻击、抢跑、套利等）
+- 🤖 已知 MEV Bot 地址识别
+- 📊 交易详情分析（Gas 价格、事件日志等）
+- 💾 SQLite 数据库存储
 - 🌐 支持代理配置
-- ⚡ 支持多种监控后端（Hydro Protocol, Go-Ethereum官方库）
 
 ## 技术栈
 
-- Go 1.21
-- ethereum-watcher - 以太坊区块链监控库
-- go-ethereum - 官方Go以太坊实现
-- Infura - 以太坊节点服务
+- Go 1.24+
+- go-ethereum - 官方 Go 以太坊实现
+- GORM - ORM 框架
+- Zap - 日志库
 
 ## 快速开始
 
@@ -28,15 +27,15 @@ go mod download
 
 ### 配置
 
-编辑 `config/MonitorConfig.go` 文件：
+创建 `.env` 文件：
 
-```go
-const (
-    ETHEREUM_RPC_URL   = "https://mainnet.infura.io/v3/YOUR_INFURA_KEY"
-    OKX_WALLET_ADDRESS = "YOUR_WALLET_ADDRESS"
-    SLEEP_SECONDS_FOR_NEW_BLOCK = 10
-    ETH_THRESHOLD = 10
-)
+```env
+# 以太坊 RPC 配置
+INFURA_KEY=your_infura_key_here
+LOG_LEVEL=info
+
+# 数据库配置
+DB_PATH=./ethereum_monitor.db
 ```
 
 ### 运行
@@ -45,47 +44,55 @@ const (
 go run main.go
 ```
 
-程序会提示选择监控模式：
-- 1: 使用 Hydro Protocol 监控（轮询模式）
-- 2: 使用官方 Go-Ethereum 监控（事件订阅模式）
-
 ## 项目结构
 
 ```
 .
-├── main.go                          # 程序入口
+├── main.go                     # 程序入口
 ├── config/
-│   └── MonitorConfig.go            # 配置文件
+│   ├── MonitorConfig.go       # 监控配置
+│   └── MevBotAddresses.go     # MEV Bot 地址库
+├── database/
+│   ├── sqlite.go              # 数据库连接
+│   └── mev_builder_repository.go  # MEV Builder 数据访问
+├── logger/
+│   └── logger.go              # 日志配置
+├── model/
+│   └── MevBuilder.go          # 数据模型
 ├── utils/
-│   └── HttpClientUtils.go          # HTTP 客户端工具
+│   ├── HttpClientUtils.go     # HTTP 客户端
+│   ├── MevDetector.go         # MEV 检测器
+│   └── MevDetector_example.go # 使用示例
 └── wallet/
-    ├── EthereumWalletMonitor.go    # 原有监控实现（Hydro Protocol）
-    └── GoEthereumWalletMonitor.go  # 新增监控实现（官方Go-Ethereum）
+    ├── EthereumWalletMonitor.go    # 钱包监控
+    └── GoEthereumWalletMonitor.go  # Go-Ethereum 监控
 ```
 
-## 配置说明
+## MEV 检测原理
 
-- `INFURA_KEY`: Infura 项目的 API 密钥（注意：不是完整URL，而是密钥部分）
-- `OKX_WALLET_ADDRESS`: 要监控的钱包地址
-- `SLEEP_SECONDS_FOR_NEW_BLOCK`: 轮询新区块的间隔（秒）
-- `ETH_THRESHOLD`: 大额交易告警阈值（ETH）
+程序通过以下特征识别 MEV 攻击：
 
-## 两种监控方式对比
+1. **三明治攻击**：检测前后夹击的交易模式
+2. **已知 Bot 地址**：匹配 MEV Bot 地址库
+3. **Gas 价格异常**：检测异常高的 Gas 价格
+4. **事件模式**：分析交易日志中的 Transfer 事件
 
-| 特性 | Hydro Protocol | Go-Ethereum |
-|------|----------------|-------------|
-| 实现方式 | HTTP轮询 | WebSocket订阅 |
-| 实时性 | 较低（取决于轮询间隔） | 更高（实时推送） |
-| 资源消耗 | 轮询开销 | 订阅开销 |
-| 官方支持 | 第三方 | 以太坊基金会 |
-| 功能覆盖 | 基础功能 | 完整功能 |
+## 已知 MEV Bot 地址
+
+项目内置了主流 MEV Builder 和 Bot 地址：
+- Flashbots Builder
+- bloXroute (Max-Profit, Non-Sandwich, Regulated)
+- Eden Network
+- beaverbuild.org
+- rsync-builder.xyz
+- Titan Builder
+- jaredfromsubway.eth (著名三明治攻击 Bot)
 
 ## 注意事项
 
-- 需要有效的 Infura API Key 或其他以太坊节点服务
-- 如果在国内使用，可能需要配置代理
-- 代理配置在 `utils/HttpClientUtils.go` 中
-- 新增了官方go-ethereum库支持，提供更多功能选项
+- 需要有效的 Infura API Key 或其他以太坊 RPC 节点
+- 代理可能影响 RPC 请求，建议关闭或配置白名单
+- Go 版本需要 1.24.0+
 
 ## License
 

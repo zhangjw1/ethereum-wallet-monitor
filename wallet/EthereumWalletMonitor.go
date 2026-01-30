@@ -2,9 +2,9 @@ package wallet
 
 import (
 	"context"
-	"etherum-monitor/config"
-	"etherum-monitor/logger"
-	"etherum-monitor/utils"
+	"ethereum-monitor/config"
+	"ethereum-monitor/logger"
+	"ethereum-monitor/utils"
 	"math/big"
 	"strings"
 
@@ -123,11 +123,11 @@ func (p *USDTTransferPlugin) Accept(log *structs.RemovableReceiptLog) {
 }
 
 func (p *USDTTransferPlugin) FromContract() string {
-	return config.USDT_CONTRACT_ADDRESS
+	return config.UsdtContractAddress
 }
 
 func (p *USDTTransferPlugin) InterestedTopics() []string {
-	return []string{config.USDT_TRANSFER_TOPIC}
+	return []string{config.UsdtTransferTopic}
 }
 
 func (p *USDTTransferPlugin) NeedReceiptLog(receiptLog *structs.RemovableReceiptLog) bool {
@@ -153,6 +153,20 @@ func (p *EtherenumThransactionPlugin) processTransaction(tx structs.RemovableTx)
 		direction = "转出"
 	}
 	value := tx.GetValue()
+
+	// 检测 MEV 攻击
+	mevDetector, err := utils.NewMevDetector(config.GetEthereumRpcUrl())
+	if err == nil {
+		defer mevDetector.Close()
+		mevResult, err := mevDetector.DetectMev(tx.GetHash())
+		if err == nil && mevResult.IsMev {
+			logger.Warn("⚠️  检测到 MEV 攻击",
+				zap.String("type", string(mevResult.MevType)),
+				zap.Float64("confidence", mevResult.Confidence),
+				zap.Strings("evidence", mevResult.Evidence))
+		}
+	}
+
 	logger.Warn("🚨 大额交易告警",
 		zap.String("direction", direction),
 		zap.String("hash", tx.GetHash()),
@@ -167,7 +181,7 @@ func createThreshold() *big.Int {
 	threshold := big.NewInt(0)
 	// 将 ETH 阈值转换为 Wei 单位 (1 ETH = 10^18 Wei)
 	// config.ETH_THRESHOLD 是以 ETH 为单位的阈值，这里是 10 ETH
-	ethValue := new(big.Int).Mul(big.NewInt(int64(config.ETH_THRESHOLD)), big.NewInt(1000000000000000000))
+	ethValue := new(big.Int).Mul(big.NewInt(int64(config.EthThreshold)), big.NewInt(1000000000000000000))
 	threshold.Set(ethValue)
 	return threshold
 }
@@ -191,36 +205,33 @@ func AddressAddMonitor() {
 
 	// 必须在创建 watcher 之前设置代理
 
-	utils.SetGlobalProxy()
+	utils.SetGlobalProxy("http://127.0.0.1:7890")
 
 	ethereumPlugin := &EtherenumThransactionPlugin{
-		targetAddress: config.OKX_WALLET_ADDRESS,
+		targetAddress: config.OkxWalletAddress,
 		threshold:     createThreshold(),
 	}
 
 	usdtTransferPlugin := &USDTTransferPlugin{
-		targetAddress: config.OKX_WALLET_ADDRESS,
-		threshold:     createUSDTThreshold(config.USDT_THRESHOLD),
+		targetAddress: config.OkxWalletAddress,
+		threshold:     createUSDTThreshold(config.UsdtThreshold),
 	}
 
 	logger.Info("正在创建 Watcher...")
 	watcher := ethereum.NewHttpBasedEthWatcher(context.Background(), config.GetEthereumRpcUrl())
 
 	// 设置轮询间隔（秒）
-	watcher.SetSleepSecondsForNewBlock(config.SLEEP_SECONDS_FOR_NEW_BLOCK)
-	logger.Info("配置完成",
-		zap.Int("pollInterval", config.SLEEP_SECONDS_FOR_NEW_BLOCK),
-		zap.String("address", config.OKX_WALLET_ADDRESS),
-		zap.Int("threshold", config.ETH_THRESHOLD))
+	watcher.SetSleepSecondsForNewBlock(config.SleepSecondsForNewBlock)
+	logger.Info("配置完成", zap.String("address", config.OkxWalletAddress), zap.Int("threshold", config.EthThreshold))
 
 	watcher.RegisterTxPlugin(ethereumPlugin)
 	logger.Info("ETH 交易插件已注册")
 
 	watcher.RegisterReceiptLogPlugin(usdtTransferPlugin)
 	logger.Info("USDT Transfer 插件已注册",
-		zap.String("contract", config.USDT_CONTRACT_ADDRESS),
-		zap.String("topic", config.USDT_TRANSFER_TOPIC),
-		zap.Int64("threshold", config.USDT_THRESHOLD))
+		zap.String("contract", config.UsdtContractAddress),
+		zap.String("topic", config.UsdtTransferTopic),
+		zap.Int64("threshold", config.UsdtThreshold))
 
 	logger.Info("⏳ 等待新区块...")
 

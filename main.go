@@ -1,10 +1,12 @@
 package main
 
 import (
-	"etherum-monitor/logger"
-	"etherum-monitor/wallet"
-	"fmt"
+	"ethereum-monitor/database"
+	"ethereum-monitor/logger"
+	"ethereum-monitor/utils"
+	"go.uber.org/zap"
 	"log"
+	"os"
 
 	"github.com/joho/godotenv"
 )
@@ -19,23 +21,30 @@ func main() {
 	logger.Init()
 	defer logger.Log.Sync()
 
-	fmt.Println("选择要运行的监控模式:")
-	fmt.Println("1. Hydro Protocol 监控")
-	fmt.Println("2. 官方 Go-Ethereum 监控")
-	fmt.Print("请输入选择 (1 或 2): ")
+	// 设置日志记录器
+	utils.SetLogger(logger.Log)
 
-	var choice int
-	fmt.Scanf("%d", &choice)
-
-	switch choice {
-	case 1:
-		fmt.Println("\n启动 Hydro Protocol 监控...")
-		wallet.AddressAddMonitor()
-	case 2:
-		fmt.Println("\n启动官方 Go-Ethereum 监控...")
-		wallet.GoEthereumAddressAddMonitor()
-	default:
-		fmt.Println("无效选择，默认启动 Hydro Protocol 监控")
-		wallet.AddressAddMonitor()
+	// 初始化数据库
+	dbPath := os.Getenv("DB_PATH")
+	if dbPath == "" {
+		dbPath = "./ethereum_monitor.db"
 	}
+	if err := database.NewSqlite(dbPath); err != nil {
+		logger.Log.Fatal("数据库初始化失败: " + err.Error())
+	}
+	defer database.Close()
+	logger.Log.Info("数据库初始化成功", zap.Any("fields", map[string]interface{}{"path": dbPath}))
+
+	// 配置代理（如果设置了 HTTP_PROXY）
+	if proxyURL := os.Getenv("HTTP_PROXY"); proxyURL != "" {
+		if err := utils.SetGlobalProxy(proxyURL); err != nil {
+			logger.Log.Error("设置代理失败: " + err.Error())
+		}
+	}
+
+	// MEV 检测示例
+	utils.ExampleUsage()
+
+	// TODO: 启动实际的监控服务
+	// wallet.AddressAddMonitor()
 }
