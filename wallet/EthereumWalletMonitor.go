@@ -3,9 +3,13 @@ package wallet
 import (
 	"context"
 	"ethereum-monitor/config"
+	"ethereum-monitor/database"
 	"ethereum-monitor/logger"
+	"ethereum-monitor/model"
 	"ethereum-monitor/utils"
+	"fmt"
 	"math/big"
+	"os"
 	"strings"
 
 	"go.uber.org/zap"
@@ -58,6 +62,9 @@ func (p *EtherenumThransactionPlugin) Accept(tx *structs.RemovableTxAndReceipt) 
 type USDTTransferPlugin struct {
 	targetAddress string
 	threshold     *big.Int
+	mevDetector   *utils.MevDetector
+	pushPlus      *utils.PushPlusNotifier
+	wechatRepo    *database.WechatAlterRepository
 }
 
 func (p *USDTTransferPlugin) Accept(log *structs.RemovableReceiptLog) {
@@ -108,10 +115,32 @@ func (p *USDTTransferPlugin) Accept(log *structs.RemovableReceiptLog) {
 		zap.String("txHash", log.GetTransactionHash()))
 
 	if value.Cmp(p.threshold) > 0 {
+		// 使用 MEV 检测器检查交易
+		txHash := log.GetTransactionHash()
+		mevResult, err := p.mevDetector.DetectMev(txHash)
+		if err != nil {
+			logger.Error("MEV 检测失败", zap.String("txHash", txHash), zap.Error(err))
+			// 检测失败时仍然发出告警
+		} else if mevResult.IsMev {
+			// 如果是 MEV 攻击，记录但不告警
+			logger.Info("检测到 MEV Bot 转账，跳过告警",
+				zap.String("mevType", string(mevResult.MevType)),
+				zap.Float64("confidence", mevResult.Confidence),
+				zap.String("from", from),
+				zap.String("to", to),
+				zap.String("amount", result.String()+" USDT"),
+				zap.String("txHash", txHash),
+				zap.Strings("evidence", mevResult.Evidence))
+			// 可选：发送 MEV 检测通知（不是告警）
+			return
+		}
+
+		// 非 MEV 攻击的大额转账，发出告警
 		direction := "转入"
 		if from == target {
 			direction = "转出"
 		}
+
 		logger.Warn("🚨 USDT 大额转账告警",
 			zap.String("direction", direction),
 			zap.String("from", from),
@@ -119,6 +148,49 @@ func (p *USDTTransferPlugin) Accept(log *structs.RemovableReceiptLog) {
 			zap.String("amount", result.String()+" USDT"),
 			zap.String("txHash", log.GetTransactionHash()),
 			zap.Int("blockNum", log.GetBlockNum()))
+
+		// 发送微信通知
+		notifStatus := "success"
+		var errorMsg string
+
+		if p.pushPlus != nil {
+			err := p.pushPlus.SendUSDTAlert(
+				direction,
+				from,
+				to,
+				result.String(),
+				txHash,
+				log.GetBlockNum(),
+			)
+			if err != nil {
+				logger.Error("发送微信通知失败", zap.Error(err))
+				notifStatus = "failed"
+				errorMsg = err.Error()
+			}
+		}
+
+		// 记录到数据库
+		if p.wechatRepo != nil {
+			notifLog := &model.WechatAlter{
+				Type:         "USDT_ALERT",
+				Direction:    direction,
+				FromAddress:  from,
+				ToAddress:    to,
+				Amount:       result.String(),
+				Currency:     "USDT",
+				TxHash:       txHash,
+				BlockNum:     log.GetBlockNum(),
+				Content:      fmt.Sprintf("🚨 USDT 大额%s告警: %s USDT", direction, result.String()),
+				Status:       notifStatus,
+				ErrorMsg:     errorMsg,
+				PublishType:  "pushplus",
+				PublishToken: os.Getenv("PUSHPLUS_TOKEN"),
+			}
+
+			if err := p.wechatRepo.Create(notifLog); err != nil {
+				logger.Error("保存通知记录失败", zap.Error(err))
+			}
+		}
 	}
 }
 
@@ -204,8 +276,27 @@ func AddressAddMonitor() {
 	logger.Info("🚀 以太坊钱包监控程序启动")
 
 	// 必须在创建 watcher 之前设置代理
-
 	utils.SetGlobalProxy("http://127.0.0.1:7890")
+
+	// 创建 MEV 检测器
+	mevDetector, err := utils.NewMevDetector(config.GetEthereumRpcUrl())
+	if err != nil {
+		logger.Fatal("创建 MEV 检测器失败", zap.Error(err))
+	}
+	defer mevDetector.Close()
+
+	// 创建 PushPlus 通知器
+	var pushPlus *utils.PushPlusNotifier
+	pushPlusToken := os.Getenv("PUSHPLUS_TOKEN")
+	if pushPlusToken != "" {
+		pushPlus = utils.NewPushPlusNotifier(pushPlusToken)
+		logger.Info("PushPlus 微信通知已启用")
+	} else {
+		logger.Warn("未配置 PushPlus，将只记录日志")
+	}
+
+	// 创建通知记录 Repository
+	wechatRepo := database.NewWechatAlterRepository()
 
 	ethereumPlugin := &EtherenumThransactionPlugin{
 		targetAddress: config.OkxWalletAddress,
@@ -215,6 +306,9 @@ func AddressAddMonitor() {
 	usdtTransferPlugin := &USDTTransferPlugin{
 		targetAddress: config.OkxWalletAddress,
 		threshold:     createUSDTThreshold(config.UsdtThreshold),
+		mevDetector:   mevDetector,
+		pushPlus:      pushPlus,
+		wechatRepo:    wechatRepo,
 	}
 
 	logger.Info("正在创建 Watcher...")
@@ -235,7 +329,7 @@ func AddressAddMonitor() {
 
 	logger.Info("⏳ 等待新区块...")
 
-	err := watcher.RunTillExit()
+	err = watcher.RunTillExit()
 	if err != nil {
 		logger.Error("运行错误", zap.Error(err))
 		return

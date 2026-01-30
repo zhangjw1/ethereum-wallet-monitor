@@ -4,6 +4,7 @@ import (
 	"ethereum-monitor/database"
 	"ethereum-monitor/logger"
 	"ethereum-monitor/utils"
+	"ethereum-monitor/wallet"
 	"go.uber.org/zap"
 	"log"
 	"os"
@@ -43,8 +44,8 @@ func main() {
 	}
 
 	// MEV 检测示例
-	utils.ExampleUsage()
+	//utils.ExampleUsage()
 
 	// TODO: 启动实际的监控服务
-	// wallet.AddressAddMonitor()
+	wallet.AddressAddMonitor()
 }

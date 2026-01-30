@@ -38,6 +38,7 @@ func NewSqlite(path string) error {
 func autoMigrate() error {
 	return DB.AutoMigrate(
 		&model.MevBuilder{},
+		&model.WechatAlter{},
 	)
 }
 
