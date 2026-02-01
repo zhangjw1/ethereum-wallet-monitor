@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/big"
 	"strings"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -63,7 +64,7 @@ func (m *MevDetector) DetectMev(txHash string) (*MevDetectionResult, error) {
 		}, nil
 	}
 
-	receipt, err := m.client.TransactionReceipt(context.Background(), hash)
+	receipt, err := m.getReceiptWithRetry(hash)
 	if err != nil {
 		return nil, err
 	}
@@ -83,6 +84,29 @@ func (m *MevDetector) DetectMev(txHash string) (*MevDetectionResult, error) {
 	m.checkFailedButExecuted(receipt, result) // 检查失败但执行的交易
 
 	return result, nil
+}
+
+func (m *MevDetector) getReceiptWithRetry(hash common.Hash) (*types.Receipt, error) {
+	const maxAttempts = 3
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		receipt, err := m.client.TransactionReceipt(context.Background(), hash)
+		if err == nil {
+			return receipt, nil
+		}
+
+		// Some RPC providers intermittently return truncated JSON; retry briefly.
+		if !strings.Contains(err.Error(), "unexpected end of JSON input") {
+			return nil, err
+		}
+
+		if attempt < maxAttempts {
+			time.Sleep(time.Duration(attempt) * 300 * time.Millisecond)
+			continue
+		}
+		return nil, err
+	}
+
+	return nil, fmt.Errorf("GetTransactionReceipt failed after retries")
 }
 
 // checkHighGasPrice 检测异常高的 Gas Price

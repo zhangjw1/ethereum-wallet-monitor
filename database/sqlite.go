@@ -39,6 +39,8 @@ func autoMigrate() error {
 	return DB.AutoMigrate(
 		&model.MevBuilder{},
 		&model.WechatAlter{},
+		&model.ContractDeployment{},
+		&model.TokenAnalysis{},
 	)
 }
 

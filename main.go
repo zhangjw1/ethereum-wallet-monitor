@@ -3,8 +3,8 @@ package main
 import (
 	"ethereum-monitor/database"
 	"ethereum-monitor/logger"
+	"ethereum-monitor/monitor"
 	"ethereum-monitor/utils"
-	"ethereum-monitor/wallet"
 	"go.uber.org/zap"
 	"log"
 	"os"
@@ -43,9 +43,39 @@ func main() {
 		}
 	}
 
-	// MEV 检测示例
-	//utils.ExampleUsage()
+	// ==================== 选择启动模式 ====================
 
-	// TODO: 启动实际的监控服务
-	wallet.AddressAddMonitor()
+	// 方式 1: 启动 Meme 币监控（推荐）
+	// 监听新合约部署和 Uniswap 交易对创建
+	monitor.StartMemeMonitor()
+
+	// 方式 2: 使用示例函数启动
+	// monitor.ExampleMemeMonitor()
+
+	// 方式 3: 自定义配置启动
+	// monitor.StartMemeMonitorWithCustomConfig(
+	//     config.GetEthereumRpcUrl(),  // RPC URL
+	//     10,                           // 轮询间隔（秒）
+	//     true,                         // 启用 PairCreated 监听
+	// )
+
+	// 方式 4: 测试分析指定代币
+	// monitor.TestAnalyzeToken("0xdAC17F958D2ee523a2206206994597C13D831ec7") // USDT
+
+	// 方式 5: 同时启动钱包监控和 Meme 币监控
+	// wallet.AddressAddMonitor() // 在 goroutine 中启动钱包监控
+	// monitor.StartMemeMonitor()      // 启动 Meme 币监控
+
+	// ==================== 其他功能 ====================
+
+	// 定时任务调度器
+	// scheduler.Init()
+	// scheduler.Start()
+	// defer scheduler.Stop()
+
+	// MEV 检测示例
+	// utils.ExampleUsage()
+
+	// Covalent API 示例
+	// utils.ExampleCovalentUsage()
 }

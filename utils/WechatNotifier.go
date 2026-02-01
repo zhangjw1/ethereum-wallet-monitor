@@ -366,3 +366,8 @@ func (p *PushPlusNotifier) SendMEVDetection(mevType, from, to, amount, txHash st
 
 	return p.Send(title, content)
 }
+
+// SendCustomAlert 发送自定义告警
+func (p *PushPlusNotifier) SendCustomAlert(title, content string) error {
+	return p.Send(title, content)
+}
