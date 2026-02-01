@@ -34,8 +34,6 @@ config/local_*.go
 # Environment variables (contains sensitive data)
 .env
 
-# Kiro settings
-.kiro/
 
 # Go sum file (can be regenerated)
 go.sum
