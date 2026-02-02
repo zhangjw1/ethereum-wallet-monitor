@@ -6,7 +6,8 @@ import (
 )
 
 const (
-	OkxWalletAddress = "0x6ea08ca8f313d860808ef7431fc72c6fbcf4a72d"
+	OkxWalletAddress     = "0x6ea08ca8f313d860808ef7431fc72c6fbcf4a72d" // OKX 钱包地址
+	BinanceWalletAddress = "0xf91773ceef22691a825b47a3f14fd68c1d876adf" // 币安买币地址
 
 	UsdtContractAddress = "0xdac17f958d2ee523a2206206994597c13d831ec7"
 
@@ -31,4 +32,14 @@ func GetEthereumRpcUrl() string {
 	}
 	fmt.Println("✓ 使用 Infura RPC 节点")
 	return fmt.Sprintf("https://mainnet.infura.io/v3/%s", infuraKey)
+}
+
+// GetEthereumWsUrl 获取 WebSocket URL
+func GetEthereumWsUrl() string {
+	infuraKey := os.Getenv("INFURA_KEY")
+
+	if infuraKey == "" {
+		return "" // 没有 WebSocket，使用轮询模式
+	}
+	return fmt.Sprintf("wss://mainnet.infura.io/ws/v3/%s", infuraKey)
 }
