@@ -41,6 +41,15 @@ type TokenAnalysis struct {
 	RiskLevel string  `gorm:"type:varchar(20);index" json:"risk_level"` // "low", "medium", "high", "critical"
 	RiskFlags string  `gorm:"type:text" json:"risk_flags"`              // JSON 数组，危险信号列表
 
+	// 监控状态 (新策略核心)
+	// Status: PENDING_LIQUIDITY, ANALYZING, MONITORING, POTENTIAL, REJECTED, RUGGED, EXPIRED
+	Status string `gorm:"type:varchar(20);index;default:'PENDING_LIQUIDITY'" json:"status"`
+
+	// 时间戳记录
+	PairCreatedAt    time.Time `json:"pair_created_at"`
+	LiquidityAddedAt time.Time `json:"liquidity_added_at"`
+	LastCheckAt      time.Time `json:"last_check_at"`
+
 	// 社交信息（可选）
 	Website  string `gorm:"type:varchar(500)" json:"website"`
 	Twitter  string `gorm:"type:varchar(500)" json:"twitter"`

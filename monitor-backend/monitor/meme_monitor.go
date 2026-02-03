@@ -28,14 +28,6 @@ func StartMemeMonitor() error {
 		utils.SetGlobalProxy("http://127.0.0.1:7890")
 	}
 
-	// 创建合约部署监听插件
-	deploymentPlugin, err := NewContractDeploymentPlugin(config.GetEthereumRpcUrl())
-	if err != nil {
-		logger.Log.Fatal("创建合约部署插件失败", zap.Error(err))
-		return err
-	}
-	defer deploymentPlugin.Close()
-
 	// 创建 PairCreated 事件监听插件
 	pairCreatedPlugin, err := NewPairCreatedPlugin(config.GetEthereumRpcUrl())
 	if err != nil {
@@ -52,11 +44,6 @@ func StartMemeMonitor() error {
 	watcher.SetSleepSecondsForNewBlock(config.SleepSecondsForNewBlock)
 	logger.Log.Info("配置完成",
 		zap.Int("pollInterval", config.SleepSecondsForNewBlock))
-
-	// 注意：RegisterTxReceiptPlugin 会为每个交易获取 receipt，产生大量 RPC 请求
-	// 暂时注释掉，只监听 Uniswap PairCreated 事件
-	// watcher.RegisterTxReceiptPlugin(deploymentPlugin)
-	// logger.Log.Info("✅ 合约部署监听插件已注册")
 
 	// 注册 PairCreated 事件监听插件
 	watcher.RegisterReceiptLogPlugin(pairCreatedPlugin)

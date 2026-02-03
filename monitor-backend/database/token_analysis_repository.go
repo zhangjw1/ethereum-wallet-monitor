@@ -49,7 +49,29 @@ func (r *TokenAnalysisRepository) GetRecentAnalyses(limit int) ([]model.TokenAna
 	return tokens, err
 }
 
-// GetByRiskLevel 根据风险等级查询
+// GetByStatus 根据状态查询
+func (r *TokenAnalysisRepository) GetByStatus(status string, limit int) ([]model.TokenAnalysis, error) {
+	var tokens []model.TokenAnalysis
+	err := DB.Where("status = ?", status).
+		Order("pair_created_at DESC").
+		Limit(limit).
+		Find(&tokens).Error
+	return tokens, err
+}
+
+// GetPendingLiquidityTokens 获取待扫描流动性的代币
+func (r *TokenAnalysisRepository) GetPendingLiquidityTokens(limit int) ([]model.TokenAnalysis, error) {
+	// 查找状态为 PENDING_LIQUIDITY 且创建时间在 2 小时以内的
+	// 如果超过 2 小时还没加池，可能是死币，暂不优先扫描（后续由过期任务清理）
+	twoHoursAgo := time.Now().Add(-2 * time.Hour)
+
+	var tokens []model.TokenAnalysis
+	err := DB.Where("status = ? AND pair_created_at > ?", "PENDING_LIQUIDITY", twoHoursAgo).
+		Order("pair_created_at ASC"). // 按时间正序，优先处理最早的
+		Limit(limit).
+		Find(&tokens).Error
+	return tokens, err
+}
 func (r *TokenAnalysisRepository) GetByRiskLevel(riskLevel string, limit int) ([]model.TokenAnalysis, error) {
 	var tokens []model.TokenAnalysis
 	err := DB.Where("risk_level = ?", riskLevel).

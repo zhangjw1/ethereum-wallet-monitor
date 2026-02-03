@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/HydroProtocol/ethereum-watcher/blockchain"
 	"github.com/HydroProtocol/ethereum-watcher/structs"
 	"go.uber.org/zap"
 )
@@ -85,24 +86,35 @@ func (p *ContractDeploymentPlugin) Accept(txAndReceipt *structs.RemovableTxAndRe
 		return // 交易失败
 	}
 
-	// 对于合约部署交易，从日志中获取合约地址
-	// 大多数合约部署都会产生日志，日志的 address 字段就是合约地址
-	logs := receipt.GetLogs()
+	// 尝试从 Receipt 中直接获取合约地址（权威方式）
 	var contractAddress string
 
-	if len(logs) > 0 {
-		// 从第一个日志获取合约地址
-		contractAddress = logs[0].GetAddress()
-		logger.Log.Debug("从日志中获取合约地址",
-			zap.String("address", contractAddress),
-			zap.String("txHash", tx.GetHash()))
-	} else {
-		// 如果没有日志，说明这个合约部署可能没有触发任何事件
-		// 这种情况下我们无法获取合约地址，跳过
-		logger.Log.Debug("合约部署无日志，无法获取合约地址",
-			zap.String("txHash", tx.GetHash()),
-			zap.String("from", tx.GetFrom()))
-		return
+	// 尝试类型断言为 EthereumTransactionReceipt 以访问 ContractAddress 字段
+	if ethReceipt, ok := receipt.(*blockchain.EthereumTransactionReceipt); ok {
+		contractAddress = ethReceipt.ContractAddress
+		if contractAddress != "" {
+			logger.Log.Debug("从由 Receipt 获取合约地址",
+				zap.String("address", contractAddress),
+				zap.String("txHash", tx.GetHash()))
+		}
+	}
+
+	// 如果未能从 Receipt 获取（例如类型断言失败），回退到旧的方法：从日志尝试获取
+	if contractAddress == "" {
+		logs := receipt.GetLogs()
+		if len(logs) > 0 {
+			// 注意：这种方式不可靠，因为 logs[0] 未必是新合约产生的
+			contractAddress = logs[0].GetAddress()
+			logger.Log.Debug("无法从 Receipt 获取地址，回退到从日志推测",
+				zap.String("address", contractAddress),
+				zap.String("txHash", tx.GetHash()))
+		} else {
+			// 如果没有日志且无法从 Receipt 获取，则无法处理
+			logger.Log.Debug("合约部署无法获取地址（无 Log 且 Receipt 字段为空）",
+				zap.String("txHash", tx.GetHash()),
+				zap.String("from", tx.GetFrom()))
+			return
+		}
 	}
 
 	if contractAddress == "" {
@@ -119,8 +131,8 @@ func (p *ContractDeploymentPlugin) Accept(txAndReceipt *structs.RemovableTxAndRe
 
 	// 暂时跳过 ERC20 检测（会产生大量 RPC 请求）
 	// TODO: 优化 ERC20 检测逻辑，添加批量查询或缓存
-	isToken := false
-	// isToken := p.tokenReader.IsERC20Token(contractAddress)
+	//	isToken := false
+	isToken := p.tokenReader.IsERC20Token(contractAddress)
 
 	// 保存部署记录
 	deployment := &model.ContractDeployment{
@@ -134,15 +146,15 @@ func (p *ContractDeploymentPlugin) Accept(txAndReceipt *structs.RemovableTxAndRe
 	}
 
 	// 暂时注释掉代币分析
-	// if isToken {
-	// 	deployment.ContractType = "ERC20"
-	// 	logger.Log.Info("🎯 检测到 ERC20 代币部署",
-	// 		zap.String("address", contractAddress),
-	// 		zap.String("txHash", tx.GetHash()))
-	//
-	// 	// 异步分析代币
-	// 	go p.analyzeNewToken(contractAddress)
-	// }
+	if isToken {
+		deployment.ContractType = "ERC20"
+		logger.Log.Info("🎯 检测到 ERC20 代币部署",
+			zap.String("address", contractAddress),
+			zap.String("txHash", tx.GetHash()))
+
+		// 异步分析代币
+		go p.analyzeNewToken(contractAddress)
+	}
 
 	if err := p.deploymentRepo.Create(deployment); err != nil {
 		logger.Log.Error("保存部署记录失败", zap.Error(err))
@@ -161,12 +173,10 @@ func (p *ContractDeploymentPlugin) analyzeNewToken(tokenAddress string) {
 	logger.Log.Info("代币分析功能开发中",
 		zap.String("address", tokenAddress))
 
-	/* 完整分析代码（需要 GoPlus API Key）
+	/* 完整分析代码（需要 GoPlus API Key）*/
 	analysis, err := p.analyzer.AnalyzeToken(tokenAddress)
 	if err != nil {
-		logger.Log.Error("代币分析失败",
-			zap.String("address", tokenAddress),
-			zap.Error(err))
+		logger.Log.Error("代币分析失败", zap.String("address", tokenAddress), zap.Error(err))
 		return
 	}
 
@@ -176,7 +186,7 @@ func (p *ContractDeploymentPlugin) analyzeNewToken(tokenAddress string) {
 	} else if p.analyzer.IsLowRiskToken(analysis) {
 		p.sendLowRiskTokenAlert(analysis)
 	}
-	*/
+
 }
 
 // sendPotentialGemAlert 发送潜力币告警
@@ -230,6 +240,7 @@ func (p *ContractDeploymentPlugin) Close() {
 // PairCreatedPlugin Uniswap PairCreated 事件监听插件
 type PairCreatedPlugin struct {
 	deploymentRepo *database.ContractDeploymentRepository
+	tokenRepo      *database.TokenAnalysisRepo
 	analyzer       *analyzer.MemeTokenAnalyzer
 	pushPlus       *utils.PushPlusNotifier
 }
@@ -251,15 +262,22 @@ func NewPairCreatedPlugin(rpcURL string) (*PairCreatedPlugin, error) {
 		// 不返回错误，继续创建插件
 		return &PairCreatedPlugin{
 			deploymentRepo: database.NewContractDeploymentRepository(),
+pository(),
+			tokenRep
 			analyzer:       nil,
 			pushPlus:       pushPlus,
 		}, nil
 	}
 
 	return &PairCreatedPlugin{
+  pushPlus,
+		}, nil
+	}
+
+	return &PairCreatedPlugin{
+		deploy
 		deploymentRepo: database.NewContractDeploymentRepository(),
 		analyzer:       memeAnalyzer,
-		pushPlus:       pushPlus,
 	}, nil
 }
 
@@ -270,7 +288,6 @@ func (p *PairCreatedPlugin) Accept(log *structs.RemovableReceiptLog) {
 		return
 	}
 
-	topics := log.GetTopics()
 	if len(topics) < 3 {
 		return
 	}
@@ -287,79 +304,56 @@ func (p *PairCreatedPlugin) Accept(log *structs.RemovableReceiptLog) {
 	// 判断哪个是 WETH，哪个是新代币
 	wethAddress := strings.ToLower(config.WETHAddress)
 	var newTokenAddress string
-
-	if strings.ToLower(token0) == wethAddress {
-		newTokenAddress = token1
-	} else if strings.ToLower(token1) == wethAddress {
-		newTokenAddress = token0
-	} else {
-		// 不是 ETH 交易对，跳过
-		return
-	}
-
-	logger.Log.Info("🔥 检测到新的 ETH 交易对创建",
-		zap.String("token", newTokenAddress),
-		zap.String("txHash", log.GetTransactionHash()),
-		zap.Int("block", log.GetBlockNum()))
-
-	// 异步分析代币
-	go p.analyzeNewPairToken(newTokenAddress)
-}
-
-// analyzeNewPairToken 分析新交易对的代币
-func (p *PairCreatedPlugin) analyzeNewPairToken(tokenAddress string) {
-	// 等待流动性添加完成
-	time.Sleep(60 * time.Second)
-
-	logger.Log.Info("开始分析新交易对代币", zap.String("address", tokenAddress))
+		// 不是 ETH 交易对（可能是 USDC/DAI 等），暂时跳过，只关注 ETH 交易对
+		// TODO: 未来可以支持 USDC 交易对
 
 	// 检查分析器是否初始化
 	if p.analyzer == nil {
-		logger.Log.Warn("分析器未初始化，跳过分析",
-			zap.String("address", tokenAddress),
-			zap.String("提示", "请配置 GOPLUS_API_KEY 以启用完整分析"))
-		return
+	pairAddress := extractAddress(log.GetData())
+	// 如果 GetData 返回的是整个 Data 字段（包含 pair address 和 index），通常 pair address 是前 32 字节（实际上前 12 字节是0，后 20 字节是地址）
+	// 这里假设 extractAddress 能处理简单的 hex string
+	// 更严谨的做法是解析 ABI，但由于数据结构简单，手动切分也可以
+	if len(log.GetData()) >= 66 {
+		pairAddress = extractAddress(log.GetData()[0:66])
 	}
 
+	// 避免重复记录
+	// 简单策略：直接 Create，如果由于 Unique 索引冲突报错，直接忽略
+	// 或者先查一下
+	existing, _ := p.tokenRepo.GetByAddress(newTokenAddress)
+	if existing != nil && existing.TokenAddress != "" {
+		logger.Log.Debug("代币已存在，跳过", zap.String("token", newTokenAddress))
 	// 执行代币分析
 	analysis, err := p.analyzer.AnalyzeToken(tokenAddress)
 	if err != nil {
-		logger.Log.Error("代币分析失败",
-			zap.String("address", tokenAddress),
-			zap.Error(err))
-		return
+	// 创建初步记录
+	// 注意：这里我们还没有 Token 的 Name/Symbol/Decimals，因为查询 RPC 会阻塞
+	// 我们先存地址，ScanJob 会负责补充信息
+	analysis := &model.TokenAnalysis{
+		TokenAddress:  newTokenAddress,
+		PairAddress:   pairAddress,
+		Status:        "PENDING_LIQUIDITY", // 初始状态
+		PairCreatedAt: time.Now(),
+		AnalyzedAt:    time.Now(),
+		LastCheckAt:   time.Now(),
+		// 默认风险等级
+		RiskLevel: "unknown",
+		RiskScore: 50,
 	}
-
-	logger.Log.Info("✅ 代币分析完成",
-		zap.String("symbol", analysis.Symbol),
-		zap.String("name", analysis.Name),
-		zap.Float64("riskScore", analysis.RiskScore),
-		zap.String("riskLevel", analysis.RiskLevel))
-
-	// 检查是否是潜力币
-	if p.analyzer.IsPotentialGem(analysis) {
-		p.sendPotentialGemAlert(analysis)
 	} else if p.analyzer.IsLowRiskToken(analysis) {
-		logger.Log.Info("✅ 发现低风险新交易对",
-			zap.String("symbol", analysis.Symbol),
-			zap.Float64("riskScore", analysis.RiskScore))
-	}
-}
-
-// sendPotentialGemAlert 发送潜力币告警
+	// 保存到数据库
+	if err := p.tokenRepo.Create(analysis); err != nil {
+		// 忽略重复键错误，其他错误打印日志
+		if !strings.Contains(err.Error(), "UNIQUE constraint failed") && !strings.Contains(err.Error(), "duplicate key") {
+			logger.Log.Error("保存代币记录失败", zap.Error(err), zap.String("token", newTokenAddress))
+		}
 func (p *PairCreatedPlugin) sendPotentialGemAlert(analysis *model.TokenAnalysis) {
 	logger.Log.Info("🎯 发现潜力 Meme 币（新交易对）！",
 		zap.String("symbol", analysis.Symbol),
-		zap.Float64("riskScore", analysis.RiskScore))
-
-	if p.pushPlus == nil {
-		return
-	}
-
-	title := "🔥 新交易对创建: " + analysis.Symbol
-	content := p.analyzer.GenerateReport(analysis)
-	content += "\n\n💎 这是一个低风险且有潜力的新币！"
-	content += "\n\n**合约地址**: `" + analysis.TokenAddress + "`"
+	logger.Log.Info("🆕 发现新交易对，加入观察队列",
+		zap.String("token", newTokenAddress),
+		zap.String("pair", pairAddress),
+		zap.String("status", analysis.Status))
 	content += "\n**Etherscan**: https://etherscan.io/address/" + analysis.TokenAddress
 	content += "\n**Uniswap**: https://app.uniswap.org/#/swap?outputCurrency=" + analysis.TokenAddress
 
