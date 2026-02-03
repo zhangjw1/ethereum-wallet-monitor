@@ -36,6 +36,15 @@ func Start() {
 	logger.Log.Info("🚀 定时任务调度器已启动")
 }
 
+// RegisterTask 注册定时任务
+func RegisterTask(spec string, cmd func()) error {
+	if cronScheduler == nil {
+		Init() // 如果没初始化，先初始化
+	}
+	_, err := cronScheduler.AddFunc(spec, cmd)
+	return err
+}
+
 // Stop 停止定时任务调度器
 func Stop() {
 	if cronScheduler != nil {

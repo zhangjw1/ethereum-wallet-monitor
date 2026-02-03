@@ -137,6 +137,36 @@ func (a *MemeTokenAnalyzer) GenerateReport(analysis *model.TokenAnalysis) string
 	return a.riskScorer.GenerateRiskReport(analysis)
 }
 
+// AnalyzeSafetyOnly 只进行安全分析（用于分阶段扫描）
+func (a *MemeTokenAnalyzer) AnalyzeSafetyOnly(analysis *model.TokenAnalysis) error {
+	// 1. 蜜罐检测
+	honeypotResult, err := a.honeypotDetector.CheckHoneypot(analysis.TokenAddress)
+	if err != nil {
+		logger.Log.Warn("蜜罐检测失败", zap.String("token", analysis.TokenAddress), zap.Error(err))
+		// 如果检测API失败，不要贸然标记为安全，可以返回错误，稍后重试
+		return err
+	}
+
+	analysis.IsHoneypot = honeypotResult.IsHoneypot
+	analysis.HoneypotReason = honeypotResult.Reason
+	analysis.BuyTax = honeypotResult.BuyTax
+	analysis.SellTax = honeypotResult.SellTax
+
+	// 2. 也是时候做一些 Holder 分析了（如果能够的话）
+	// TODO: 集成 Etherscan / RPC Holder 分析
+
+	// 3. 计算风险评分（此时已有 Liquidity 和 Honeypot 信息）
+	score, level, flags := a.riskScorer.CalculateRiskScore(analysis)
+	analysis.RiskScore = score
+	analysis.RiskLevel = level
+
+	// 更新 RiskFlags
+	flagsJSON, _ := json.Marshal(flags)
+	analysis.RiskFlags = string(flagsJSON)
+
+	return nil
+}
+
 // Close 关闭资源
 func (a *MemeTokenAnalyzer) Close() {
 	if a.tokenReader != nil {

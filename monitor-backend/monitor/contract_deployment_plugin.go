@@ -240,8 +240,7 @@ func (p *ContractDeploymentPlugin) Close() {
 // PairCreatedPlugin Uniswap PairCreated 事件监听插件
 type PairCreatedPlugin struct {
 	deploymentRepo *database.ContractDeploymentRepository
-	tokenRepo      *database.TokenAnalysisRepo
-	analyzer       *analyzer.MemeTokenAnalyzer
+	tokenRepo      *database.TokenAnalysisRepository
 	pushPlus       *utils.PushPlusNotifier
 }
 
@@ -253,82 +252,54 @@ func NewPairCreatedPlugin(rpcURL string) (*PairCreatedPlugin, error) {
 		pushPlus = utils.NewPushPlusNotifier(token)
 	}
 
-	// 创建 Meme 币分析器
-	// 注意：即使没有 GoPlus API Key，分析器也可以工作，只是蜜罐检测会失败
-	goPlusAPIKey := os.Getenv("GOPLUS_API_KEY")
-	memeAnalyzer, err := analyzer.NewMemeTokenAnalyzer(rpcURL, goPlusAPIKey)
-	if err != nil {
-		logger.Log.Warn("创建 Meme 币分析器失败，将跳过代币分析", zap.Error(err))
-		// 不返回错误，继续创建插件
-		return &PairCreatedPlugin{
-			deploymentRepo: database.NewContractDeploymentRepository(),
-pository(),
-			tokenRep
-			analyzer:       nil,
-			pushPlus:       pushPlus,
-		}, nil
-	}
-
 	return &PairCreatedPlugin{
-  pushPlus,
-		}, nil
-	}
-
-	return &PairCreatedPlugin{
-		deploy
 		deploymentRepo: database.NewContractDeploymentRepository(),
-		analyzer:       memeAnalyzer,
+		tokenRepo:      database.NewTokenAnalysisRepository(),
+		pushPlus:       pushPlus,
 	}, nil
 }
 
 // Accept 处理 PairCreated 事件
 func (p *PairCreatedPlugin) Accept(log *structs.RemovableReceiptLog) {
-	logger.Log.Info("收到 PairCreated 事件")
 	if log.IsRemoved {
 		return
 	}
 
+	topics := log.GetTopics()
 	if len(topics) < 3 {
 		return
 	}
 
 	// PairCreated(address indexed token0, address indexed token1, address pair, uint)
-	// topics[0] = 事件签名
-	// topics[1] = token0
-	// topics[2] = token1
-	// data = pair address + pair index
-
 	token0 := extractAddress(topics[1])
 	token1 := extractAddress(topics[2])
 
 	// 判断哪个是 WETH，哪个是新代币
 	wethAddress := strings.ToLower(config.WETHAddress)
 	var newTokenAddress string
-		// 不是 ETH 交易对（可能是 USDC/DAI 等），暂时跳过，只关注 ETH 交易对
-		// TODO: 未来可以支持 USDC 交易对
 
-	// 检查分析器是否初始化
-	if p.analyzer == nil {
+	if strings.ToLower(token0) == wethAddress {
+		newTokenAddress = token1
+	} else if strings.ToLower(token1) == wethAddress {
+		newTokenAddress = token0
+	} else {
+		// 不是 ETH 交易对（可能是 USDC/DAI 等），暂时跳过
+		return
+	}
+
 	pairAddress := extractAddress(log.GetData())
-	// 如果 GetData 返回的是整个 Data 字段（包含 pair address 和 index），通常 pair address 是前 32 字节（实际上前 12 字节是0，后 20 字节是地址）
-	// 这里假设 extractAddress 能处理简单的 hex string
-	// 更严谨的做法是解析 ABI，但由于数据结构简单，手动切分也可以
 	if len(log.GetData()) >= 66 {
 		pairAddress = extractAddress(log.GetData()[0:66])
 	}
 
-	// 避免重复记录
-	// 简单策略：直接 Create，如果由于 Unique 索引冲突报错，直接忽略
-	// 或者先查一下
+	// 1. 避免重复记录
 	existing, _ := p.tokenRepo.GetByAddress(newTokenAddress)
 	if existing != nil && existing.TokenAddress != "" {
 		logger.Log.Debug("代币已存在，跳过", zap.String("token", newTokenAddress))
-	// 执行代币分析
-	analysis, err := p.analyzer.AnalyzeToken(tokenAddress)
-	if err != nil {
-	// 创建初步记录
-	// 注意：这里我们还没有 Token 的 Name/Symbol/Decimals，因为查询 RPC 会阻塞
-	// 我们先存地址，ScanJob 会负责补充信息
+		return
+	}
+
+	// 2. 创建初步记录
 	analysis := &model.TokenAnalysis{
 		TokenAddress:  newTokenAddress,
 		PairAddress:   pairAddress,
@@ -336,30 +307,21 @@ func (p *PairCreatedPlugin) Accept(log *structs.RemovableReceiptLog) {
 		PairCreatedAt: time.Now(),
 		AnalyzedAt:    time.Now(),
 		LastCheckAt:   time.Now(),
-		// 默认风险等级
-		RiskLevel: "unknown",
-		RiskScore: 50,
+		RiskLevel:     "unknown",
+		RiskScore:     50,
 	}
-	} else if p.analyzer.IsLowRiskToken(analysis) {
-	// 保存到数据库
+
+	// 3. 保存到数据库
 	if err := p.tokenRepo.Create(analysis); err != nil {
-		// 忽略重复键错误，其他错误打印日志
-		if !strings.Contains(err.Error(), "UNIQUE constraint failed") && !strings.Contains(err.Error(), "duplicate key") {
-			logger.Log.Error("保存代币记录失败", zap.Error(err), zap.String("token", newTokenAddress))
+		if !strings.Contains(err.Error(), "UNIQUE") && !strings.Contains(err.Error(), "duplicate") {
+			logger.Log.Error("保存Token失败", zap.Error(err), zap.String("token", newTokenAddress))
 		}
-func (p *PairCreatedPlugin) sendPotentialGemAlert(analysis *model.TokenAnalysis) {
-	logger.Log.Info("🎯 发现潜力 Meme 币（新交易对）！",
-		zap.String("symbol", analysis.Symbol),
+		return
+	}
+
 	logger.Log.Info("🆕 发现新交易对，加入观察队列",
 		zap.String("token", newTokenAddress),
-		zap.String("pair", pairAddress),
-		zap.String("status", analysis.Status))
-	content += "\n**Etherscan**: https://etherscan.io/address/" + analysis.TokenAddress
-	content += "\n**Uniswap**: https://app.uniswap.org/#/swap?outputCurrency=" + analysis.TokenAddress
-
-	if err := p.pushPlus.SendCustomAlert(title, content); err != nil {
-		logger.Log.Error("发送告警失败", zap.Error(err))
-	}
+		zap.String("pair", pairAddress))
 }
 
 // FromContract 返回监听的合约地址
@@ -379,9 +341,7 @@ func (p *PairCreatedPlugin) NeedReceiptLog(receiptLog *structs.RemovableReceiptL
 
 // Close 关闭资源
 func (p *PairCreatedPlugin) Close() {
-	if p.analyzer != nil {
-		p.analyzer.Close()
-	}
+	// 暂时没有需要关闭的资源
 }
 
 // extractAddress 从 Topic 中提取地址

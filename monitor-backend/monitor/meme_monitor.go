@@ -4,6 +4,7 @@ import (
 	"context"
 	"ethereum-monitor/config"
 	"ethereum-monitor/logger"
+	"ethereum-monitor/scheduler" // 新增
 	"ethereum-monitor/utils"
 	"os"
 
@@ -44,6 +45,37 @@ func StartMemeMonitor() error {
 	watcher.SetSleepSecondsForNewBlock(config.SleepSecondsForNewBlock)
 	logger.Log.Info("配置完成",
 		zap.Int("pollInterval", config.SleepSecondsForNewBlock))
+
+	// 初始化流动性扫描器
+	liquidityScanner, err := scheduler.NewLiquidityScanner(config.GetEthereumRpcUrl())
+	if err != nil {
+		logger.Log.Error("创建流动性扫描器失败", zap.Error(err))
+		return err
+	}
+	defer liquidityScanner.Close()
+
+	// 注册流动性扫描任务 (每 30 秒执行一次)
+	if err := scheduler.RegisterTask("@every 30s", liquidityScanner.Run); err != nil {
+		logger.Log.Error("注册流动性扫描任务失败", zap.Error(err))
+	} else {
+		logger.Log.Info("✅ 流动性扫描器已启动 (每 30s)")
+	}
+
+	// 初始化安全扫描器
+	goPlusAPIKey := os.Getenv("GOPLUS_API_KEY")
+	safetyScanner, err := scheduler.NewSafetyScanner(config.GetEthereumRpcUrl(), goPlusAPIKey)
+	if err != nil {
+		logger.Log.Error("创建安全扫描器失败", zap.Error(err))
+		return err
+	}
+	defer safetyScanner.Close()
+
+	// 注册安全扫描任务 (每 1 分钟执行一次)
+	if err := scheduler.RegisterTask("@every 1m", safetyScanner.Run); err != nil {
+		logger.Log.Error("注册安全扫描任务失败", zap.Error(err))
+	} else {
+		logger.Log.Info("✅ 安全扫描器已启动 (每 1m)")
+	}
 
 	// 注册 PairCreated 事件监听插件
 	watcher.RegisterReceiptLogPlugin(pairCreatedPlugin)
