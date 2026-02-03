@@ -59,13 +59,16 @@ func main() {
 
 	// 方式 2: 启动 Meme 币监控（推荐）
 	// 监听新合约部署和 Uniswap 交易对创建
+
+	// 同时也启动钱包 Watcher 监控 (在后台运行)
+	go func() {
+		if err := wallet.StartWatcherMonitor(context.Background()); err != nil {
+			logger.Log.Error("启动 Watcher 监控失败", zap.Error(err))
+		}
+	}()
+
 	if err := monitor.StartMemeMonitor(); err != nil {
 		logger.Log.Error("启动 Meme 监控失败", zap.Error(err))
-	}
-
-	err := wallet.StartWatcherMonitor(context.Background())
-	if err != nil {
-		logger.Log.Error("启动 Watcher 监控失败", zap.Error(err))
 	}
 
 	// 阻塞主程，防止退出

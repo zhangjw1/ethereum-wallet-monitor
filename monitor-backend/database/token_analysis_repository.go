@@ -116,3 +116,15 @@ func (r *TokenAnalysisRepository) GetDailyStats(date time.Time) (map[string]inte
 
 	return stats, nil
 }
+
+// GetTokensForSafetyCheck 获取待安全检测的代
+// GetTokensForSafetyCheck 获取待安全检测的代币
+func (r *TokenAnalysisRepository) GetTokensForSafetyCheck(limit int) ([]model.TokenAnalysis, error) {
+	var tokens []model.TokenAnalysis
+	// 查找 ANALYZING 状态的任务，或者 MONITORING 状态但需要重试的任务
+	err := DB.Where("status = ? OR (status = ? AND safety_status = ?)", "ANALYZING", "MONITORING", "RETRY_NEEDED").
+		Order("pair_created_at DESC").
+		Limit(limit).
+		Find(&tokens).Error
+	return tokens, err
+}

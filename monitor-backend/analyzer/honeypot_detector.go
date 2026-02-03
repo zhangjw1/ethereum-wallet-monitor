@@ -59,6 +59,19 @@ func (h *HoneypotDetector) checkWithHoneypotIs(tokenAddress string) (*HoneypotRe
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		// 如果返回 404，说明 API 还没有该代币数据（通常是因为太新）
+		// 这种情况下，我们不能判定为蜜罐，也不能完全判定安全
+		// 暂时返回非蜜罐，但标记原因
+		if resp.StatusCode == http.StatusNotFound {
+			return &HoneypotResult{
+				IsHoneypot: false,
+				Reason:     "Honeypot API data not found (too new)",
+				CanBuy:     true, // 假设可买
+				CanSell:    true, // 假设可卖
+				BuyTax:     0,    // 假设0税
+				SellTax:    0,
+			}, nil
+		}
 		return nil, fmt.Errorf("honeypot API returned status %d", resp.StatusCode)
 	}
 

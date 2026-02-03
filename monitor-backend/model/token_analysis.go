@@ -45,6 +45,9 @@ type TokenAnalysis struct {
 	// Status: PENDING_LIQUIDITY, ANALYZING, MONITORING, POTENTIAL, REJECTED, RUGGED, EXPIRED
 	Status string `gorm:"type:varchar(20);index;default:'PENDING_LIQUIDITY'" json:"status"`
 
+	// SafetyStatus: PENDING, COMPLETED, RETRY_NEEDED
+	SafetyStatus string `gorm:"type:varchar(20);default:'PENDING'" json:"safety_status"`
+
 	// 时间戳记录
 	PairCreatedAt    time.Time `json:"pair_created_at"`
 	LiquidityAddedAt time.Time `json:"liquidity_added_at"`
