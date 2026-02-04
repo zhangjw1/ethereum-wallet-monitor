@@ -27,8 +27,27 @@ func GetEthereumRpcUrl() string {
 
 	if infuraKey == "" {
 		// 如果没有设置环境变量，使用公共节点
+		// 注意：公共节点可能不稳定，建议使用 Infura 或 Alchemy
 		fmt.Println("⚠️  未设置 INFURA_KEY 环境变量，使用公共 RPC 节点")
-		return "https://eth.llamarpc.com"
+		fmt.Println("⚠️  公共节点可能不稳定，建议设置 INFURA_KEY 或 ALCHEMY_KEY")
+
+		// 尝试使用 Alchemy 公共端点
+		if alchemyKey := os.Getenv("ALCHEMY_KEY"); alchemyKey != "" {
+			fmt.Println("✓ 使用 Alchemy RPC 节点")
+			return fmt.Sprintf("https://eth-mainnet.g.alchemy.com/v2/%s", alchemyKey)
+		}
+
+		// 备用公共节点列表（按优先级）
+		publicNodes := []string{
+			"https://eth.llamarpc.com",
+			"https://rpc.ankr.com/eth",
+			"https://ethereum.publicnode.com",
+			"https://1rpc.io/eth",
+		}
+
+		// 使用第一个公共节点
+		fmt.Printf("使用公共节点: %s\n", publicNodes[0])
+		return publicNodes[0]
 	}
 	fmt.Println("✓ 使用 Infura RPC 节点")
 	return fmt.Sprintf("https://mainnet.infura.io/v3/%s", infuraKey)

@@ -194,6 +194,7 @@ type erc20TransferPlugin struct {
 }
 
 func (p *erc20TransferPlugin) Accept(log *structs.RemovableReceiptLog) {
+	logger.Info("收到ERC-20代币转账")
 	if log.IsRemoved {
 		return
 	}
