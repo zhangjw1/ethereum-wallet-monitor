@@ -1,6 +1,6 @@
 import React from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
-import { LayoutDashboard, Activity, Layers, FileCode, Hexagon } from 'lucide-react';
+import { LayoutDashboard, Layers, Shield, Bell, FileCode, Hexagon } from 'lucide-react';
 import styles from './Layout.module.css';
 
 const Layout: React.FC = () => {
@@ -15,24 +15,32 @@ const Layout: React.FC = () => {
                 <nav className={styles.nav}>
                     <NavLink 
                         to="/" 
+                        end
                         className={({ isActive }) => `${styles.navItem} ${isActive ? styles.active : ''}`}
                     >
                         <LayoutDashboard size={20} />
                         <span>Dashboard</span>
                     </NavLink>
                     <NavLink 
-                        to="/liquidations" 
-                        className={({ isActive }) => `${styles.navItem} ${isActive ? styles.active : ''}`}
-                    >
-                        <Activity size={20} />
-                        <span>Liquidations</span>
-                    </NavLink>
-                    <NavLink 
                         to="/transfers" 
                         className={({ isActive }) => `${styles.navItem} ${isActive ? styles.active : ''}`}
                     >
                         <Layers size={20} />
-                        <span>Transfers</span>
+                        <span>交易流水</span>
+                    </NavLink>
+                    <NavLink 
+                        to="/tokens" 
+                        className={({ isActive }) => `${styles.navItem} ${isActive ? styles.active : ''}`}
+                    >
+                        <Shield size={20} />
+                        <span>代币分析</span>
+                    </NavLink>
+                    <NavLink 
+                        to="/notifications" 
+                        className={({ isActive }) => `${styles.navItem} ${isActive ? styles.active : ''}`}
+                    >
+                        <Bell size={20} />
+                        <span>通知记录</span>
                     </NavLink>
                     <NavLink 
                         to="/api-docs" 
@@ -48,7 +56,7 @@ const Layout: React.FC = () => {
                         <div className={styles.statusDot}></div>
                         <span>System Operational</span>
                     </div>
-                    <div className={styles.version}>v3.0.0</div>
+                    <div className={styles.version}>v3.1.0</div>
                 </div>
             </aside>
             <main className={styles.main}>
