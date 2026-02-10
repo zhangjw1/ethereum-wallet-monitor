@@ -51,11 +51,12 @@ func StartWatcherMonitor(ctx context.Context) error {
 	// 配置监控参数
 	monitorConfig := &MonitorConfig{
 		Addresses: map[string]string{
-			config.OkxWalletAddress: "OKX钱包",
+			config.OkxWalletAddress:     "OKX钱包",
+			config.BinanceWalletAddress: "币安储备地址",
 		},
 		Tokens: []TokenConfig{
 			{
-				Address:  common.HexToAddress("0xdac17f958d2ee523a2206206994597c13d831ec7"), // USDT
+				Address:  common.HexToAddress(config.UsdtContractAddress), // USDT
 				Symbol:   "USDT",
 				Decimals: 6,
 			},

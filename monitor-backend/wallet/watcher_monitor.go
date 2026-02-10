@@ -14,15 +14,15 @@ import (
 
 // WatcherMonitor 基于 ethereum-watcher 的监控器（HTTP 轮询）
 type WatcherMonitor struct {
-	watcher *ethereum.AbstractWatcher
+	watcher *ethereum.AbstractWatcher // ethereum-watcher 框架的监听器实例，负责轮询区块和分发事件
 
-	addressMgr   *AddressManager
-	notifSvc     *NotificationService
-	mevFilter    *MevFilter
-	tokenHandler *TokenHandler
+	addressMgr   *AddressManager      // 地址管理器，管理监控的钱包地址列表和标签
+	notifSvc     *NotificationService // 通知服务，负责发送通知和记录到数据库
+	mevFilter    *MevFilter           // MEV 过滤器，用于检测和过滤 MEV Bot 交易
+	tokenHandler *TokenHandler        // 代币处理器，管理 ERC20 代币配置和金额解析
 
-	ethThreshold   *big.Int
-	tokenThreshold *big.Int
+	ethThreshold   *big.Int // ETH 转账阈值（Wei 单位），只有超过此金额的交易才会触发通知
+	tokenThreshold *big.Int // ERC20 代币转账阈值（最小单位），只有超过此金额的交易才会触发通知
 }
 
 // NewWatcherMonitor 创建 ethereum-watcher 监控器
@@ -105,8 +105,9 @@ func (m *WatcherMonitor) Close() {
 }
 
 // ethTransactionPlugin ETH 交易插件
+// 实现 ITxPlugin 接口，用于监听和处理 ETH 原生代币的转账交易
 type ethTransactionPlugin struct {
-	monitor *WatcherMonitor
+	monitor *WatcherMonitor // 监控器实例，用于访问地址管理、通知服务、MEV 过滤等公共组件
 }
 
 func (p *ethTransactionPlugin) AcceptTx(tx structs.RemovableTx) {
@@ -183,18 +184,14 @@ func (p *ethTransactionPlugin) AcceptTx(tx structs.RemovableTx) {
 	}
 }
 
-func (p *ethTransactionPlugin) Accept(tx *structs.RemovableTxAndReceipt) {
-	// 不需要处理 receipt
-}
-
 // erc20TransferPlugin ERC20 Transfer 插件
+// 实现 IReceiptLogPlugin 接口，用于监听特定 ERC20 代币的 Transfer 事件
 type erc20TransferPlugin struct {
-	monitor      *WatcherMonitor
-	tokenAddress common.Address
+	monitor      *WatcherMonitor // 监控器实例，用于访问地址管理、通知服务等公共组件
+	tokenAddress common.Address  // 要监听的 ERC20 代币合约地址（如 USDT、USDC 等）
 }
 
 func (p *erc20TransferPlugin) Accept(log *structs.RemovableReceiptLog) {
-	logger.Info("收到ERC-20代币转账")
 	if log.IsRemoved {
 		return
 	}
@@ -213,6 +210,7 @@ func (p *erc20TransferPlugin) Accept(log *structs.RemovableReceiptLog) {
 
 	// 检查是否与监控地址相关
 	if !p.monitor.addressMgr.IsMonitored(fromAddr) && !p.monitor.addressMgr.IsMonitored(toAddr) {
+		logger.Info("不相关地址的转账，不做处理~~~")
 		return
 	}
 

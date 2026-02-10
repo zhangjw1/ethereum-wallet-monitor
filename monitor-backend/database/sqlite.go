@@ -41,6 +41,7 @@ func autoMigrate() error {
 		&model.WechatAlter{},
 		&model.ContractDeployment{},
 		&model.TokenAnalysis{},
+		&model.TransferRecord{},
 	)
 }
 

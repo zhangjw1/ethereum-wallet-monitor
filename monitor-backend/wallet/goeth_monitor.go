@@ -16,16 +16,16 @@ import (
 
 // GoEthMonitor 基于 go-ethereum 的监控器（支持 WebSocket + HTTP 轮询）
 type GoEthMonitor struct {
-	client   *ethclient.Client
-	wsClient *ethclient.Client
+	client   *ethclient.Client // HTTP RPC 客户端，用于查询区块和交易数据
+	wsClient *ethclient.Client // WebSocket 客户端，用于实时订阅新区块（可选，如果为 nil 则使用轮询模式）
 
-	addressMgr   *AddressManager
-	notifSvc     *NotificationService
-	mevFilter    *MevFilter
-	tokenHandler *TokenHandler
+	addressMgr   *AddressManager      // 地址管理器，管理监控的钱包地址列表和标签
+	notifSvc     *NotificationService // 通知服务，负责发送通知和记录到数据库
+	mevFilter    *MevFilter           // MEV 过滤器，用于检测和过滤 MEV Bot 交易
+	tokenHandler *TokenHandler        // 代币处理器，管理 ERC20 代币配置和金额解析
 
-	ethThreshold   *big.Int
-	tokenThreshold *big.Int
+	ethThreshold   *big.Int // ETH 转账阈值（Wei 单位），只有超过此金额的交易才会触发通知
+	tokenThreshold *big.Int // ERC20 代币转账阈值（最小单位），只有超过此金额的交易才会触发通知
 }
 
 // NewGoEthMonitor 创建 go-ethereum 监控器

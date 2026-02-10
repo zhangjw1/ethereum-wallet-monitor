@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"ethereum-monitor/api"
 	"ethereum-monitor/database"
 	"ethereum-monitor/logger"
 	"ethereum-monitor/monitor"
@@ -9,6 +10,7 @@ import (
 	"ethereum-monitor/utils"
 	"ethereum-monitor/wallet"
 	"log"
+	"net/http"
 	"os"
 
 	"go.uber.org/zap"
@@ -46,6 +48,20 @@ func main() {
 			logger.Log.Error("设置代理失败: " + err.Error())
 		}
 	}
+
+	// ==================== 启动 API 服务 ====================
+	apiPort := os.Getenv("API_PORT")
+	if apiPort == "" {
+		apiPort = "8080"
+	}
+	mux := http.NewServeMux()
+	api.Route(mux)
+	go func() {
+		if err := http.ListenAndServe(":"+apiPort, mux); err != nil {
+			logger.Log.Error("API 服务启动失败", zap.Error(err))
+		}
+	}()
+	logger.Log.Info("API 服务已启动", zap.String("port", apiPort))
 
 	// ==================== 选择启动模式 ====================
 

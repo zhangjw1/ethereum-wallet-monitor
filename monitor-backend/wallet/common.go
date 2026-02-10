@@ -17,23 +17,24 @@ import (
 
 // TokenConfig ERC20 代币配置
 type TokenConfig struct {
-	Address  common.Address
-	Symbol   string
-	Decimals int
+	Address  common.Address // 代币合约地址（如 USDT: 0xdac17f958d2ee523a2206206994597c13d831ec7）
+	Symbol   string         // 代币符号（如 "USDT", "USDC", "DAI"）
+	Decimals int            // 代币小数位数（USDT/USDC 是 6，大多数代币是 18）
 }
 
 // MonitorConfig 监控配置
 type MonitorConfig struct {
-	Addresses      map[string]string // 地址 -> 标签
-	Tokens         []TokenConfig     // 要监控的 ERC20 代币
-	ETHThreshold   *big.Int          // ETH 阈值（Wei）
-	TokenThreshold *big.Int          // 代币阈值（最小单位）
+	Addresses      map[string]string // 要监控的钱包地址映射表，key: 地址，value: 标签（如 "OKX钱包"）
+	Tokens         []TokenConfig     // 要监控的 ERC20 代币列表（如 USDT、USDC 等）
+	ETHThreshold   *big.Int          // ETH 转账阈值（Wei 单位），超过此金额才触发通知
+	TokenThreshold *big.Int          // ERC20 代币转账阈值（代币最小单位），超过此金额才触发通知
 }
 
 // AddressManager 地址管理器
+// 负责管理监控的钱包地址列表，提供地址查询和标签管理功能
 type AddressManager struct {
-	addressLabels map[common.Address]string
-	addressSet    map[common.Address]struct{}
+	addressLabels map[common.Address]string   // 地址到标签的映射表，用于显示友好的地址名称
+	addressSet    map[common.Address]struct{} // 地址集合，用于快速判断地址是否被监控（O(1) 查询）
 }
 
 // NewAddressManager 创建地址管理器
@@ -81,9 +82,11 @@ func (am *AddressManager) GetLabelList() []string {
 }
 
 // NotificationService 通知服务
+// 负责发送各种通知（PushPlus 微信通知）、记录交易流水和通知历史到数据库
 type NotificationService struct {
-	pushPlus   *utils.PushPlusNotifier
-	wechatRepo *database.WechatAlterRepository
+	pushPlus     *utils.PushPlusNotifier            // PushPlus 通知器，用于发送微信通知（可选，需要配置 PUSHPLUS_TOKEN）
+	wechatRepo   *database.WechatAlterRepository    // 通知记录仓库，用于保存通知历史到数据库
+	transferRepo *database.TransferRecordRepository // 交易流水仓库，用于保存钱包/交易流水
 }
 
 // NewNotificationService 创建通知服务
@@ -94,22 +97,24 @@ func NewNotificationService() *NotificationService {
 	}
 
 	return &NotificationService{
-		pushPlus:   pushPlus,
-		wechatRepo: database.NewWechatAlterRepository(),
+		pushPlus:     pushPlus,
+		wechatRepo:   database.NewWechatAlterRepository(),
+		transferRepo: database.NewTransferRecordRepository(),
 	}
 }
 
 // TransferNotification 转账通知信息
+// 包含转账交易的所有相关信息，用于发送通知和记录到数据库
 type TransferNotification struct {
-	Direction   string
-	Label       string
-	From        string
-	To          string
-	Amount      string
-	Currency    string
-	TxHash      string
-	BlockNum    int
-	ShouldAlert bool // 是否需要告警（大额交易）
+	Direction   string // 转账方向："转入" 或 "转出"（相对于监控地址）
+	Label       string // 监控地址的标签（如 "OKX钱包"）
+	From        string // 发送方地址（十六进制字符串）
+	To          string // 接收方地址（十六进制字符串）
+	Amount      string // 转账金额（已格式化的字符串，如 "100.50"）
+	Currency    string // 币种（如 "ETH", "USDT", "USDC"）
+	TxHash      string // 交易哈希（十六进制字符串）
+	BlockNum    int    // 区块号
+	ShouldAlert bool   // 是否需要发送告警通知（true: 大额交易，false: 只记录不通知）
 }
 
 // SendTransferNotification 发送转账通知
@@ -155,7 +160,27 @@ func (ns *NotificationService) SendTransferNotification(notif *TransferNotificat
 		}
 	}
 
-	// 记录到数据库
+	// 1. 写入交易流水表（只要通知的数据都落库）
+	if ns.transferRepo != nil {
+		record := &model.TransferRecord{
+			MonitorLabel: notif.Label,
+			Direction:    notif.Direction,
+			FromAddress:  strings.ToLower(notif.From),
+			ToAddress:    strings.ToLower(notif.To),
+			Amount:       notif.Amount,
+			Currency:     notif.Currency,
+			TxHash:       strings.ToLower(notif.TxHash),
+			BlockNumber:  notif.BlockNum,
+			Notified:     true,
+			NotifyStatus: notifStatus,
+		}
+		if err := ns.transferRepo.Create(record); err != nil {
+			logger.Error("保存交易流水失败", zap.Error(err))
+			return err
+		}
+	}
+
+	// 2. 记录到通知历史表（wechat_alters）
 	if ns.wechatRepo != nil {
 		emoji := "📥"
 		if notif.Direction == "转出" {
@@ -196,8 +221,9 @@ func (ns *NotificationService) IsProcessed(txHash string) bool {
 }
 
 // MevFilter MEV 过滤器
+// 用于检测和过滤 MEV (Maximal Extractable Value) Bot 交易，避免误报
 type MevFilter struct {
-	detector *utils.MevDetector
+	detector *utils.MevDetector // MEV 检测器实例，用于分析交易是否为 MEV 攻击
 }
 
 // NewMevFilter 创建 MEV 过滤器
@@ -243,9 +269,10 @@ func (mf *MevFilter) Close() {
 }
 
 // TokenHandler ERC20 代币处理器
+// 管理多个 ERC20 代币的配置，提供统一的 Transfer 事件主题和金额解析功能
 type TokenHandler struct {
-	tokens        map[common.Address]*TokenConfig
-	transferTopic common.Hash
+	tokens        map[common.Address]*TokenConfig // 代币地址到配置的映射表，存储所有监控的代币信息
+	transferTopic common.Hash                     // Transfer 事件的主题哈希（所有 ERC20 代币共用同一个）
 }
 
 // NewTokenHandler 创建代币处理器
